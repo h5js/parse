@@ -1,148 +1,96 @@
-var                 TITLE=1,                                  DIV=2,          QUALIFY=3,    END=5,                 SYM=7,                                         REG=8,                                                    REFINE=9,                               KEY=10,MID=11,
-reInitGrammar = /(\$?[a-zA-Z]\w*(?:\[\w+(?:,\w+)*\])?)\s*:|([\n\r|]|#.*)|\[([+~])(\w+)\]|(\})|([?+*~!&=])?(?:(?:([a-zA-Z]\w*(?:\[[?+~]\w+(?:,[?+~]\w+)*\])?)|\/((?:[^\/\\[\n\r]|\\.|\[(?:[^\]\\\n\r]|\\.)*\])+)\/)(?:[>=](\w+(?:\[[?+~]\w+(?:,[?+~]\w+)*\])?))?|`(\w+)`|(\{)|(\S+))/g,
-                                                                                    USE=4,       FLAG=6,                                                                                                                                                                        REST=12;
+var rePrepareGrammar = /(\$?)(\w+(?:\[\w+(?:,\w+)*\])?)\s*:\s*|([?+*&~!=])?(\{)\s*|([\n\r|]|#.*)\s*|(\[[+~]\w+\])|(\})|(\S+)/g;
+var reGrammarWords = /(?:(\w+)(?:\[(\w+(?:,\w+)*)\])?([:=#])|([\n\r]|\||#.*)|\[([+~])(\w+)\]|(?:(\})|([?+*&=!~]?)(?:(\{)|((\w+)(?:\[([?+~]\w+(?:,[?+~]\w+)*)\])?|`(\w+)`|((?:[^\s\\>]|\\.)+))))(?:>(\w+)(?:\[([?+~]\w+(?:,[?+~]\w+)*)\])?)?)(?=\s|$)/g;
+var                      NAME=1,   PARAMS=2,         AS=3,   DIVS=4,           BY=5, USE=6,     END=7,TAG=8,     BEG=9,  ITEM=10,SYM=11,ARGS=12,                  KEY=13,REG=14,                   RSYM=15,  RARGS=16;
+
+var tags = ' ?+*&=!~';
 function initGrammar(text) {
-  var grammar = object(), text_end = text.length;
-  var re = reInitGrammar, got;
-  re.lastIndex = 0;
-  // var token = get();
-  // if (!token)
-  //   throw error('Grammar is empty.');
-  // grammar.$ = token.s;   //记录语法根符号
-
-  while (token = get(1)) {
-    if (token.t !== TITLE)
-      throw error('Grammar error: %s', token.s);
-    var symbol = getSymbol(token.s);
-    grammar[token.s] = symbol;
-    if(token.r) symbol.r = token.r;
-    if(token.p) symbol.p = token.p;
-  }
-
+  var grammar = object();
+  reGrammarWords.lastIndex = 0;
+  reGrammarWords.ms = 1;
+  prepareSymbol(-1);
   return grammar;
 
-  function getSymbol(name) {
-    var symbol = object(), p = 0;
-    var produc = object(), i = 0;
-    var token, item;
-    while (token = get()) {
-      var type = token.t;
-      if(type === SYM || type === REG) {
-        get(1);
-        if(token.r) {
-          item = object();
-          item.s = token.s;
-          item.r = token.r;
+  function prepareSymbol(tag) {
+    var name='0', params, as, symbol = [], p = 0, produc = [], i = 0;
+    if(tag>0)
+      symbol[p++] = tag;
+    while (reGrammarWords.ms && (reGrammarWords.ms = scan(reGrammarWords, text))) {
+      var ms = reGrammarWords.ms, item, s;
+      if(s = ms[ITEM]) {
+        if(ms[REG]) {
+          item = {r: s + '|'};
+        }
+        else if( s = ms[KEY] ) {
+          item = {r: '\\b' + s + '\\b|'};
         }
         else {
-          item = token.s;
+          item = {s: ms[SYM]};
+          if (s = ms[ARGS]) item.a = s;
+        }
+        if (s = ms[TAG]) item.f = s;
+        if (s = ms[RSYM]) {
+          item.R = s;
+          if (s = ms[RARGS])
+            item.A = s;
         }
         produc[i++] = item;
       }
-      else if(type === MID) {
-        get(1);
-        item = getSymbol();
-        if(token.f) item.f = token.f;
-        produc[i++] = item;
+      else if(ms[BEG]) {  // 开始子语法项：
+        if( s = prepareSymbol(indexOf(tags, ms[TAG]))) {
+          produc[i++] = s;
+        }
       }
       else {
-        if (i) {
-          symbol[p++] = produc;
-          produc = object(), i = 0;
+        if(i)
+          symbol[p++] = produc, produc = [], i = 0;
+        if(s = ms[USE]) {
+          produc.q = ms[BY];
+          produc.u = s;
         }
-        if(type === TITLE) {
-          if (!name)
-            throw error('Grammar error: %s', token.s);
+        else if(ms[END]){   // 结束子语法项：
+          if(tag<0)
+            throw error('Grammar error: }');
+          if (s = ms[RSYM]) {
+            symbol.R = s;
+            if (s = ms[RARGS])
+              symbol.A = s;
+          }
           break;
         }
-        get(1);
-        if (type === END) {
-          if (name)
-            throw error('Grammar error: %s', token.s);
-          break;
-        }
-        if(type === QUALIFY) {
-          produc.q = token.q, produc.u = token.u;
+        else if(s = ms[NAME]) {   // 语法项
+          if(tag>=0)
+            throw error('Grammar error: %s', s);
+          if(p && name) {
+            if(params) symbol.p = params;
+            if(as) symbol.as = as;
+            grammar[name] = symbol, symbol = [], p = 0;
+          }
+          name = s, params = ms[PARAMS], as = ms[AS] === ':' ? 0 : ms[AS];
         }
       }
     }
-    if (i)
-      symbol[p] = produc;
-    return symbol;
-  }
-
-  function get(out) {
-    var token;
-    if (got) {
-      token = got;
-      if (out) got = 0;
+    if(i)
+      symbol[p++] = produc;
+    if(p) {
+      if(tag>=0)
+        return symbol;
+      if(params) symbol.p = params;
+      if(as) symbol.as = as;
+      grammar[name] = symbol;
     }
-    else if (re.lastIndex < text_end) {
-      var ms = scan(re, text);
-      if (ms) {
-        token = object();
-        var s;
-        if (s = ms[TITLE]) {
-          token.t = TITLE, token.s = s;
-        }
-        else if (ms[DIV]) {
-          token.t = DIV;
-        }
-        else if (s = ms[QUALIFY]) {
-          token.t = QUALIFY, token.q = s, token.u = ms[USE];
-        }
-        else if (ms[END]) {
-          token.t = END;
-        }
-        else {
-          var f = ms[FLAG] || '';
-          if (s = ms[SYM]) {
-            token.t = SYM;
-            token.s = f + s;
-            if(s = ms[REFINE]) {
-              token.r = s;
-            }
-          }
-          else if (s = ms[REG]) {
-            token.t = REG;
-            token.s = f + s + '|';
-            if(s = ms[REFINE]) {
-              token.r = s;
-            }
-          }
-          else if (s = ms[KEY]) {
-            token.t = REG;
-            token.s = f + '\\b' + s + '\\b|';
-          }
-          else if (ms[MID]) {
-            token.t = MID;
-            if(f) token.f = f;
-          }
-          else /* ms[REST] */ {
-            token.t = REG;
-            token.s = f + ms[REST] + '|';
-          }
-        }
-        if (!out) got = token;
-      }
-      else {
-        text_end = 0;
-      }
-    }
-    return token;
   }
 }
 
 var reNameParams = /(\w+)\[(\w+(?:,\w+)*)\]/;
 var reSymArgs = /(\w+)\[([?+~]\w+(?:,[?+~]\w+)*)\]/g;
 function expandGrammar(srcGrammar) {
-  var desGrammar = object();
+  var desGrammar = object(), used = object();
 
   var srcNames = getOwnPropertyNames(srcGrammar);
   for (var sn = 0, srcName; srcName = srcNames[sn]; sn++) {
     var srcSymbol = srcGrammar[srcName];
     var params, ms;
-    params = (ms = match(srcName, reNameParams)) ? (srcName = ms[1], split(ms[2], ',')) : [];
+    params = split(srcSymbol.p, ',');
     // 生成可能的符号参数组合：
     for (var mix = 1, len = params.length; mix < len; mix++)
       for (var bas = 0, end = len - mix; bas < end; bas++)
@@ -152,41 +100,146 @@ function expandGrammar(srcGrammar) {
     // 从符号初始符号名开始，生成所有参数组合后的可能的符号：
     var param = '';   // 初始符号名的后缀参数为空
     for (var p = -1; p < params.length;) {  // p 从 -1 开始将先处理初始符号名
-      var desSymbol = object();
       var desName = srcName + param;
-      desSymbol._ = desName;    // for debug
-
-      for (var dp = 0, sp = 0, srcProduc; srcProduc = srcSymbol[sp]; sp++) {
-        var use;
-        if( (use = srcProduc.u ) && (indexOf(param, use)<0) ^ (srcProduc.q==='~') )
-          continue;
-
-        var desProduc = desSymbol[dp++] = object();
-
-        // 对每一产生项进行后缀变异：
-        for (var i = 0, item; item = srcProduc[i]; i++) {
-          desProduc[i] = replace(item, reSymArgs, function (s, name, args) {
-            args = split(args, ',');
-            for (var a = 0, arg; arg = args[a]; a++) {
-              s = arg[0];
-              arg = slice(arg, 1);
-              if (s === '+' || s === '?' && indexOf(param, arg) >= 0)
-                name += arg;
-            }
-            return name;
-          });
-        }
-      }
-      desGrammar[desName] = desSymbol;
+      desGrammar[desName] = expandSymbol(srcSymbol, param);
       param = params[++p];  //因为从 -1 开始，一定要先增
     }
   }
+
+  var desNames = getOwnPropertyNames(desGrammar);
+  for(var dn = 0; desName = desNames[dn]; dn++) {
+    if(!used[desName])
+      delete desGrammar[desName];
+  }
+
+  return desGrammar;
+
+  function expandSymbol(srcSymbol, param) {
+    var desSymbol = object();
+    for (var dp = 0, sp = 0, srcProduc; srcProduc = srcSymbol[sp]; sp++) {
+      var use;
+      if( (use = srcProduc.u ) && (indexOf(param, use)<0) ^ (srcProduc.q==='~') )
+        continue;
+
+      var desProduc = desSymbol[dp++] = object();
+
+      // 对每一产生项进行后缀变异：
+      for (var i = 0, srcItem; srcItem = srcProduc[i]; i++) {
+        var desItem, s;
+        if(s = srcItem.s) {
+          desItem = object();
+          desItem.s = expand(s, srcItem.a, param);
+        }
+        else if(s = srcItem.r) {
+          desItem = object();
+          desItem.r = s;
+        }
+        else {
+          desItem = expandSymbol(srcItem, param);
+        }
+        if(s = srcItem.R) {
+          desItem.R = expand(s, srcItem.A, param);
+        }
+        if(s = srcItem.f) {
+          desItem.f = s;
+        }
+        desProduc[i] = desItem;
+      }
+    }
+    return desSymbol;
+  }
+
+  function expand(name, arg, param) {
+    if(arg) {
+      arg = split(arg, ',');
+      for (var i = 0, f, a; a = arg[i]; i++) {
+        f = a[0];
+        a = slice(a, 1);
+        if (f === '+' || f === '?' && indexOf(param, a) >= 0)
+          name += a;
+      }
+    }
+    used[name] = 1;
+    return name;
+  }
 }
 
-function makeGrammar(grammar) {
+function linkGrammar(srcGrammar) {
+  var desGrammar = object(), cache = object();
+  var names = getOwnPropertyNames(srcGrammar);
+  for(var i=names.length, name; name = names[--i];) {
+    var symbol = linkSymbol(name, []);
+    desGrammar[name] = symbol;
+  }
 
+  return desGrammar;
+
+  function linkSymbol(name, trail) {
+
+  }
 }
 
-function linkGrammar(grammar) {
+function compressGrammar(text) {
+  var words = [], w=0, ms, p = 0, s, x;
+  reGrammarWords.lastIndex = 0;
+  while(ms = scan(reGrammarWords, text)) {
+    if(s = ms[NAME]) {
+      if(x = ms[PARAMS])
+        s += '[' + x + ']';
+      s += ms[AS];
+      if(!p && w>0) {
+        words[w-1] = s;
+      }
+      else {
+        words[w++] = s;
+      }
+      p = 0;
+    }
+    else if(ms[DIVS]) {
+      if(p) {
+        words[w++] = '|';
+        p = 0;
+      }
+    }
+    else if(s = ms[BY]) {
+      words[w++] = '[' + s + ms[USE] + ']';
+      p = 1;
+    }
+    else {
+      s = ms[TAG];
+      if (x = ms[BEG]) {
+        s += x;
+        words[w++] = s;
+        p = 0;
+      }
+      else {
+        if(x = ms[SYM]){
+          s += x;
+          if(x = ms[ARGS]) s += '[' + x + ']';
+        }
+        else if(x = ms[REG]) {
+          s += x;
+        }
+        else {
+          s = ms[END];
+        }
 
+        if (x = ms[RSYM]) {
+          s += x;
+          if (x = ms[RARGS])
+            s += '[' + x + ']';
+        }
+        if(s === '}' && !p ) {
+          words[w-1] = s;
+        }
+        else {
+          words[w++] = s;
+        }
+        p = 1;
+      }
+    }
+  }
+  if(!p) words.pop();
+  return words.join(' ');
 }
+
