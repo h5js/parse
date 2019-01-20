@@ -1,0 +1,47 @@
+Script:
+  ?ScriptBody
+  .*Include[?x,+y] ;
+ScriptBody:
+  StatementList[~Yield,~Await,~Return]
+Module[Yield]:
+  *ModuleItem
+ModuleItem:
+  ImportDeclaration
+  [+Local] ExportDeclaration
+  StatementListItem[~Yield,~Await,~Return]
+ImportDeclaration:
+  `import` {
+     ImportClause FromClause
+     ModuleSpecifier
+  } ;
+ImportClause:
+  ImportedDefaultBinding ?{ , { NameSpaceImport | NamedImports } }
+  NameSpaceImport | NamedImport
+ImportedDefaultBinding:
+ ImportedBinding
+NameSpaceImport:
+ '*' `as` ImportedBinding
+NamedImports=
+ '{' ?{ ImportsList ?, } '}'
+FromClause:
+  `from` ModuleSpecifier
+ImportsList=
+  ImportSpecifier *{ , ImportSpecifier }
+ImportSpecifier:
+  ImportedBinding
+  IdentifierName `as` ImportedBinding
+ModuleSpecifier:
+  StringLiteral
+ImportedBinding:
+  BindingIdentifier[~Yield,~Await]
+ExportDeclaration:
+  `export` {
+    { \* FromClause | ExportClause[+Local] | ExportClause[~Local] FromClause } ;
+    VariableStatement[~Yield,~Await]
+    Declaration[~Yield,~Await]
+    `default` {
+      HoistableDeclaration[~Yield,~Await,+Default]
+      ClassDeclaration[~Yield,~Await,+Default]
+      !{ `function` | `async` ~ `function` | `class` } AssignmentExpression[+In,~Yield,~Await] ;
+    }
+  }
