@@ -4,14 +4,14 @@ var                      NAME=1,   PARAMS=2,         AS=3,   DIVS=4,           B
 
 var tags = ' ?+*&=!~';
 function initGrammar(text) {
-  var grammar = object();
+  var grammar = [], g = 0;
   reGrammarWords.lastIndex = 0;
   reGrammarWords.ms = 1;
   prepareSymbol(-1);
   return grammar;
 
   function prepareSymbol(tag) {
-    var name='0', params, as, symbol = [], p = 0, produc = [], i = 0;
+    var name, params, as, symbol = [], p = 0, produc = [], i = 0;
     if(tag>0)
       symbol[p++] = tag;
     while (reGrammarWords.ms && (reGrammarWords.ms = scan(reGrammarWords, text))) {
@@ -60,10 +60,11 @@ function initGrammar(text) {
         else if(s = ms[NAME]) {   // 语法项
           if(tag>=0)
             throw error('Grammar error: %s', s);
-          if(p && name) {
+          if(p) {
+            if(name) symbol.n = name;
             if(params) symbol.p = params;
             if(as) symbol.as = as;
-            grammar[name] = symbol, symbol = [], p = 0;
+            grammar[g++] = symbol, symbol = [], p = 0;
           }
           name = s, params = ms[PARAMS], as = ms[AS] === ':' ? 0 : ms[AS];
         }
@@ -74,9 +75,10 @@ function initGrammar(text) {
     if(p) {
       if(tag>=0)
         return symbol;
+      if(name) symbol.n = name;
       if(params) symbol.p = params;
       if(as) symbol.as = as;
-      grammar[name] = symbol;
+      grammar[g++] = symbol;
     }
   }
 }
@@ -84,32 +86,39 @@ function initGrammar(text) {
 var reNameParams = /(\w+)\[(\w+(?:,\w+)*)\]/;
 var reSymArgs = /(\w+)\[([?+~]\w+(?:,[?+~]\w+)*)\]/g;
 function expandGrammar(srcGrammar) {
-  var desGrammar = object(), used = object();
+  var desGrammar = [], ds = 0, used = object();
 
-  var srcNames = getOwnPropertyNames(srcGrammar);
-  for (var sn = 0, srcName; srcName = srcNames[sn]; sn++) {
-    var srcSymbol = srcGrammar[srcName];
-    var params, ms;
-    params = split(srcSymbol.p, ',');
-    // 生成可能的符号参数组合：
-    for (var mix = 1, len = params.length; mix < len; mix++)
-      for (var bas = 0, end = len - mix; bas < end; bas++)
-        for (var pos = bas + 1; pos <= end; pos++)
-          push(params, params[bas] + join(piece(params, pos, pos + mix), ''));
+  for (var ss = 0, srcSymbol; srcSymbol = srcGrammar[ss]; ss++) {
+    var srcName, params, desSymbol;
+    if( (srcName = srcSymbol.n) && (params = srcSymbol.p) ){
+      params = split(params, ',');
+      // 生成可能的符号参数组合：
+      for (var mix = 1, len = params.length; mix < len; mix++)
+        for (var bas = 0, end = len - mix; bas < end; bas++)
+          for (var pos = bas + 1; pos <= end; pos++)
+            push(params, params[bas] + join(piece(params, pos, pos + mix), ''));
 
-    // 从符号初始符号名开始，生成所有参数组合后的可能的符号：
-    var param = '';   // 初始符号名的后缀参数为空
-    for (var p = -1; p < params.length;) {  // p 从 -1 开始将先处理初始符号名
-      var desName = srcName + param;
-      desGrammar[desName] = expandSymbol(srcSymbol, param);
-      param = params[++p];  //因为从 -1 开始，一定要先增
+      // 从符号初始符号名开始，生成所有参数组合后的可能的符号：
+      var param = '';   // 初始符号名的后缀参数为空
+      for (var p = -1; p < params.length;) {  // p 从 -1 开始将先处理初始符号名
+        desSymbol = expandSymbol(srcSymbol, param);
+        desSymbol.n = srcName + param;
+        desGrammar[ds++] = desSymbol;
+        param = params[++p];  //因为从 -1 开始，一定要先增
+      }
+    }
+    else {
+      desSymbol = expandSymbol(srcSymbol, []);
+      if(srcName) desSymbol.n = srcName;
+      desGrammar[ds++] = desSymbol;
     }
   }
 
-  var desNames = getOwnPropertyNames(desGrammar);
-  for(var dn = 0; desName = desNames[dn]; dn++) {
-    if(!used[desName])
-      delete desGrammar[desName];
+  srcGrammar = desGrammar;
+  desGrammar = [srcGrammar[0]];
+  for(ss = 1, ds = 1; srcSymbol = srcGrammar[ss]; ss++) {
+    if(used[srcSymbol.n])
+      desGrammar[ds++] = srcGrammar[ss];
   }
 
   return desGrammar;
@@ -165,17 +174,39 @@ function expandGrammar(srcGrammar) {
 }
 
 function linkGrammar(srcGrammar) {
-  var desGrammar = object(), cache = object();
-  var names = getOwnPropertyNames(srcGrammar);
-  for(var i=names.length, name; name = names[--i];) {
-    var symbol = linkSymbol(name, []);
-    desGrammar[name] = symbol;
+  var desGrammar = object(), linked = object();
+  for(var srcSymbolIdx=srcGrammar.length, srcSymbol; srcSymbol = srcGrammar[--srcSymbolIdx];) {
+    if(srcSymbol.a === '#') {
+      var name = srcSymbol.n;
+      var desSymbol = linkSymbol(name, []);
+      desGrammar[name] = desSymbol;
+    }
   }
 
   return desGrammar;
 
   function linkSymbol(name, trail) {
+    var i = indexBy(trail, name);
+    if( i >=0)
+      throw error('Circle grammar: %s->%s', join(piece(trail, i), '->'), name);
 
+    var desSymbol = linked[name];
+    if(!srcSymbol) {
+      desSymbol = linked[name] = object();
+      srcSymbol = srcGrammar[name];
+      if(srcSymbol)
+        throw error('Undefined symbol: %s', name);
+      push(trail, name);
+
+      for(var srcProducIdx=0, srcProduc; srcProduc = srcSymbol[srcProducIdx]; srcProducIdx++) {
+        var option = 1;
+        for(var srcItemIdx=0, srcItem; srcItem = srcProduc[srcItemIdx]; srcItemIdx++) {
+
+        }
+      }
+
+      pop(trail);
+    }
   }
 }
 
